@@ -3,11 +3,9 @@
 Usage:
     python -m hhh.detector
 """
-import os
+import argparse
 import pathlib
-import struct
 import time
-from datetime import datetime
 
 import librosa
 import librosa.display
@@ -15,106 +13,113 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from sklearn import metrics
+import torch.optim as optim
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import LabelEncoder
-
-from keras.callbacks import ModelCheckpoint
-from keras.layers import (Activation, Conv2D, Convolution2D, Dense, Dropout,
-                          Flatten, GlobalAveragePooling2D, MaxPooling2D)
-from keras.models import Sequential
-from keras.optimizers import Adam
-from keras.utils import np_utils, to_categorical
+from torch.utils.data import DataLoader, TensorDataset
+from tqdm import tqdm
 
 
 # TODO: consider using the full RGB image (though it might not matter much)
-def extract_features(file_name):
-    """Returns the MFCC as a GREYSCALE image."""
+def extract_features(filename):
+    """Returns the MFCC."""
     try:
-        audio, sample_rate = librosa.load(file_name, res_type='kaiser_fast')
+        audio, sample_rate = librosa.load(filename, res_type='kaiser_fast')
         mfccs = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
-        mfccsscaled = np.mean(mfccs.T, axis=0)  # greyscaled
-    except Exception as e:
-        print("Error encountered while parsing file: ", file_name)
+        #  mfccsscaled = np.mean(mfccs.T, axis=0)  # Average over time
+    except Exception as err:
+        print(f"Error encountered while parsing file {filename}: {err}")
         return None
-
-    return mfccsscaled
-
-
-# Read data in and extract features.
-fulldatasetpath = pathlib.Path('data/bird-audio-detection/')
-labels = pd.read_csv(fulldatasetpath / "ff1010-labels.csv")
-data = []
-
-for index, row in labels.iterrows():
-    filename = fulldatasetpath / "ff1010-wav" / row.itemid
-    label = row.hasbird
-    feature = extract_features(filename)
-    data.append([feature, label])
-
-data = np.array(data)
-features = data[:, 0]
-labels = data[:, 1]
-
-# 80-20 split
-features_train, features_test, labels_train, labels_test = \
-    train_test_split(features, labels, test_size=0.2, random_state=42)
-
-num_channels = 1  # (greyscale)
-
-features_train = features_train.reshape(features_train.shape[0], data.shape[0],
-                                        data.shape[1], num_channels)
-features_test = features_test.reshape(features_test.shape[0], data.shape[0],
-                                      data.shape[1], num_channels)
-
-num_labels = data.shape[1]
+    return mfccs
 
 
+# TODO: Cache the MFCC's.
+def retrieve_data(
+        labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
+        batch_size: int) -> ("features", "labels", "trainloader", "testloader"):
+    """Loads the dataset."""
+    labels_csv = pd.read_csv(labels_csv_path)
+    features = []
+    labels = []
 
-use_cuda = torch.cuda.is_available()
-device   = torch.device("cuda" if use_cuda else "cpu")
-print(device)
+    for _, row in tqdm(list(labels_csv.iterrows())):
+        filename = wav_dir / f"{row.itemid}.wav"
+        label = row.hasbird
+        feature = extract_features(filename)
+        features.append(feature)
+        labels.append(label)
 
-pytorch_model = nn.Sequential(
-    nn.Conv2D(in_channels=num_channels,
-              out_channels=16,
-              kernel_size=2,
-              stride=1),
-    nn.ReLU(),
-    nn.MaxPool2d(pool_size=2),
-    nn.Dropout(0.2),
-    nn.Conv2D(in_channels=16, out_channels=32, kernel_size=2, stride=1),
-    nn.MaxPool2d(pool_size=2),
-    nn.Dropout(0.2),
-    nn.Conv2D(in_channels=32, out_channels=64, kernel_size=2, stride=1),
-    nn.ReLU(),
-    nn.MaxPool2d(pool_size=2),
-    nn.Dropout(0.2),
-    nn.Conv2D(in_channels=64, out_channels=128, kernel_size=2, stride=1),
-    nn.ReLU(),
-    nn.MaxPool2d(pool_size=2),
-    nn.Dropout(0.2),
-    nn.AvgPool2d(kernel_size=(data.shape[0] // 16, data.shape[1]//16)) ), # Global Avg Pooling -> one number per channel
-    nn.Linear(in_features=128, out_features=1),
-    # output = log ( p(bird=1) / p(bird=0) )
-    # p(bird = 1) = sigmoid(output)
-    nn.Sigmoid(),
-).to(device)
+    features = np.array(features, dtype=np.float32)
+    features = features.reshape(
+        (features.shape[0], 1, features.shape[1], features.shape[2]))
+    labels = np.array(labels, dtype=np.float32)
+    features_train, features_test, labels_train, labels_test = \
+        train_test_split(features, labels, test_size=0.2, random_state=42)
 
-trainset = torch.utils.data.TensorDataset(torch.from_numpy(features_train), torch.from_numpy(labels_train))
+    trainset = TensorDataset(torch.from_numpy(features_train),
+                             torch.from_numpy(labels_train))
+    testset = TensorDataset(torch.from_numpy(features_test),
+                            torch.from_numpy(labels_test))
 
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=4,
-                                          shuffle=True, num_workers=2)
+    trainloader = DataLoader(trainset,
+                             batch_size=batch_size,
+                             shuffle=True,
+                             num_workers=2)
+    testloader = DataLoader(testset,
+                            batch_size=batch_size,
+                            shuffle=False,
+                            num_workers=2)
 
-testset = torch.utils.data.TensorDataset(torch.from_numpy(features_test), torch.from_numpy(labels_test))
-testloader = torch.utils.data.DataLoader(testset, batch_size=4,
-                                         shuffle=False, num_workers=2)
+    return features, labels, trainloader, testloader
 
 
-def fit(detector, epochs: int, model_path: str):
-    bceloss = nn.BCELoss() # Double check this
-    optimizer = optim.Adam(classifier.parameters())
+def make_detector_model(features, labels, device) -> nn.Module:
+    """Returns a new instance of the detector model."""
+    # Input: (1,40,431)
+    return nn.Sequential(
+        nn.Conv2d(in_channels=1,
+                  out_channels=16,
+                  kernel_size=3,
+                  stride=1,
+                  padding=1),  # -> (16,40,431)
+        nn.ReLU(),
+        nn.MaxPool2d(kernel_size=2),  # -> (16,20,215)
+        nn.Dropout(0.2),
+        nn.Conv2d(in_channels=16,
+                  out_channels=32,
+                  kernel_size=3,
+                  stride=1,
+                  padding=1),  # -> (32,20,215)
+        nn.ReLU(),
+        nn.MaxPool2d(kernel_size=2),  # -> (32,10,107)
+        nn.Dropout(0.2),
+        nn.Conv2d(in_channels=32,
+                  out_channels=64,
+                  kernel_size=3,
+                  stride=1,
+                  padding=1),  # -> (64,10,107)
+        nn.ReLU(),
+        nn.MaxPool2d(kernel_size=2),  # -> (64,5,53)
+        nn.Dropout(0.2),
+        nn.Conv2d(in_channels=64,
+                  out_channels=128,
+                  kernel_size=3,
+                  stride=1,
+                  padding=1),  # -> (128,5,53)
+        nn.ReLU(),
+        nn.MaxPool2d(kernel_size=2),  # -> (128,2,26)
+        nn.Dropout(0.2),
+        nn.AvgPool2d(kernel_size=(2, 26)),  # -> (128,1) (Global Avg Pooling)
+        nn.Flatten(),
+        nn.Linear(in_features=128,
+                  out_features=1),  # -> z = log ( p(bird=1) / p(bird=0) )
+        nn.Sigmoid(),  # -> p(bird = 1) = sigmoid(z)
+    ).to(device)
+
+
+def fit(detector, trainloader, epochs: int, model_path: str, device):
+    """Trains the detector model."""
+    bce_loss = nn.BCELoss()  # Double check this
+    optimizer = optim.Adam(detector.parameters())
 
     for epoch in range(epochs):
         print(f"=== Epoch {epoch + 1} ===")
@@ -124,95 +129,101 @@ def fit(detector, epochs: int, model_path: str):
         for batch_i, data in enumerate(trainloader):
             features = data[0].to(device)
             labels = data[1].to(device)
-            
+
             optimizer.zero_grad()
-            
-            outputs = detector(inputs)
-            loss = bceloss(outputs, labels)
+
+            outputs = detector(features)
+            loss = bce_loss(outputs, labels)
             loss.backward()
             optimizer.step()
-            
+
             # Logging
             total_loss += loss.item()
             if (batch_i + 1) % 100 == 0:
                 print(f"Batch {batch_i + 1:5d}: {total_loss}")
                 total_loss = 0.0
-        
+
         # Bookmark
         torch.save(detector.state_dict(), model_path)
 
-model_path = "detector.pth"
 
-use_existing_model = False
-if use_existing_model:
-    detector.load_state_dict(torch.load(model_path))
+def parse_args():
+    """All script options."""
+    parser = argparse.ArgumentParser(
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-fit(detector, 72 - 3 + 3, model_path)
+    # Filepaths
+    parser.add_argument("--labels-csv-path",
+                        type=str,
+                        default="data/bird-audio-detection/ff1010-labels.csv",
+                        help="Location of CSV labels.")
+    parser.add_argument("--wav-dir",
+                        type=str,
+                        default="data/bird-audio-detection/ff1010-wav/",
+                        help="Directory holding WAV files")
+    parser.add_argument("--model-load-path",
+                        type=str,
+                        default=None,
+                        help=("Filepath of a model to load. "
+                              "Leave as None to avoid loading."))
+    parser.add_argument("--model-save-path",
+                        type=str,
+                        default="detector.pth",
+                        help="Filepath to save the model.")
 
-torch.save(detector.state_dict(), model_path)
+    # Computation
+    parser.add_argument("--force-cpu",
+                        action="store_true",
+                        help=("Pass this flag to force PyTorch to use the CPU. "
+                              "Otherwise, the GPU will be used if available."))
 
-# #
-# # Keras stuff
-# #
+    # Algorithm hyperparameters
+    parser.add_argument("--epochs",
+                        type=int,
+                        default=72,
+                        help="Number of epochs to train the model.")
+    parser.add_argument("--batch-size",
+                        type=int,
+                        default=16,
+                        help="Training (and testing) batch size")
 
-# # Construct model
-# keras_model = Sequential(
-#     Conv2D(filters=16,
-#            kernel_size=2,
-#            input_shape=(data.shape[0], data.shape[1], num_channels),
-#            activation='relu'),
-#     MaxPooling2D(pool_size=2),
-#     Dropout(0.2),
-#     Conv2D(filters=32, kernel_size=2, activation='relu'),
-#     MaxPooling2D(pool_size=2),
-#     Dropout(0.2),
-#     Conv2D(filters=64, kernel_size=2, activation='relu'),
-#     MaxPooling2D(pool_size=2),
-#     Dropout(0.2),
-#     Conv2D(filters=128, kernel_size=2, activation='relu'),
-#     MaxPooling2D(pool_size=2),
-#     Dropout(0.2),
-#     GlobalAveragePooling2D(),
-#     Dense(num_labels, activation='softmax'),
-# )
-
-# # Compile the model
-# keras_model.compile(loss='categorical_crossentropy',
-#                     metrics=['accuracy'],
-#                     optimizer='adam')
-# # Display model architecture summary
-# keras_model.summary()
+    return parser.parse_args()
 
 
-# # Calculate pre-training accuracy
-# score = keras_model.evaluate(features_test, labels_test, verbose=1)
-# accuracy = 100 * score[1]
+def main():
+    """Run everything (duh)."""
+    args = parse_args()
 
-# print("Pre-training accuracy: %.4f%%" % accuracy)
+    # Choose device.
+    use_cuda = torch.cuda.is_available() and not args.force_cpu
+    device = torch.device("cuda" if use_cuda else "cpu")
+    print("Device:", device)
 
-# num_epochs = 72
-# num_batch_size = 256
+    print("Loading data")
+    features, labels, trainloader, testloader = retrieve_data(
+        pathlib.Path(args.labels_csv_path), pathlib.Path(args.wav_dir),
+        args.batch_size)
+    print("Making model")
+    detector = make_detector_model(features, labels, device)
 
-# checkpointer = ModelCheckpoint(
-#     filepath='saved_models/weights.best.basic_cnn.hdf5',
-#     verbose=1,
-#     save_best_only=True)
-# start = datetime.now()
+    # Load the model if so desired.
+    if args.model_load_path is not None:
+        print(f"Loaded model from {args.model_load_path}")
+        detector.load_state_dict(torch.load(args.model_load_path))
 
-# model.fit(features_train,
-#           labels_train,
-#           batch_size=num_batch_size,
-#           epochs=num_epochs,
-#           validation_data=(features_test, labels_test),
-#           callbacks=[checkpointer],
-#           verbose=1)
+    # Train.
+    print("Start training")
+    start = time.time()
+    fit(detector, trainloader, args.epochs, args.model_save_path, device)
+    end = time.time()
+    print("End training")
+    print(f"=== Training time: {end - start} s ===")
 
-# duration = datetime.now() - start
-# print("Training completed in time: ", duration)
+    torch.save(detector.state_dict(), args.model_save_path)
+    print(f"Model saved to {args.model_save_path}")
 
-# # Evaluating the model on the training and testing set
-# score = model.evaluate(features_train, labels_train, verbose=0)
-# print("Training Accuracy: ", score[1])
+    # TODO: evaluation
 
-# score = model.evaluate(features_test, labels_test, verbose=0)
-# print("Testing Accuracy: ", score[1])
+
+if __name__ == "__main__":
+    main()
