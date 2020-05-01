@@ -32,16 +32,15 @@ def extract_features(filename):
     return mfccs
 
 
-# TODO: Cache the MFCC's.
-def retrieve_data(
-        labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
-        batch_size: int) -> ("features", "labels", "trainloader", "testloader"):
+def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
+                  feature_npy_path: pathlib.Path,
+                  label_npy_path: pathlib.Path) -> ("features", "labels"):
     """Loads the dataset."""
     labels_csv = pd.read_csv(labels_csv_path)
     features = []
     labels = []
 
-    for _, row in tqdm(list(labels_csv.iterrows())):
+    for _, row in tqdm(list(labels_csv.iterrows())[:10]):
         filename = wav_dir / f"{row.itemid}.wav"
         label = row.hasbird
         feature = extract_features(filename)
@@ -52,6 +51,16 @@ def retrieve_data(
     features = features.reshape(
         (features.shape[0], 1, features.shape[1], features.shape[2]))
     labels = np.array(labels, dtype=np.float32)
+
+    np.save(feature_npy_path, features)
+    np.save(label_npy_path, labels)
+
+    return features, labels
+
+
+def make_dataloaders(features, labels,
+                     batch_size: int) -> ("trainloader", "testloader"):
+    """Make dataloaders from the features and labels."""
     features_train, features_test, labels_train, labels_test = \
         train_test_split(features, labels, test_size=0.2, random_state=42)
 
@@ -69,7 +78,7 @@ def retrieve_data(
                             shuffle=False,
                             num_workers=2)
 
-    return features, labels, trainloader, testloader
+    return trainloader, testloader
 
 
 def make_detector_model(features, labels, device) -> nn.Module:
@@ -132,16 +141,15 @@ def fit(detector, trainloader, epochs: int, model_path: str, device):
 
             optimizer.zero_grad()
 
-            outputs = detector(features)
+            outputs = detector(features).view(features.shape[0])
             loss = bce_loss(outputs, labels)
             loss.backward()
             optimizer.step()
 
             # Logging
             total_loss += loss.item()
-            if (batch_i + 1) % 100 == 0:
-                print(f"Batch {batch_i + 1:5d}: {total_loss}")
-                total_loss = 0.0
+
+        print("Loss:", total_loss)
 
         # Bookmark
         torch.save(detector.state_dict(), model_path)
@@ -161,6 +169,19 @@ def parse_args():
                         type=str,
                         default="data/bird-audio-detection/ff1010-wav/",
                         help="Directory holding WAV files")
+    parser.add_argument("--features-npy-path",
+                        type=str,
+                        default="ff1010-features.npy",
+                        help="File for generated features, saved as numpy.")
+    parser.add_argument("--labels-npy-path",
+                        type=str,
+                        default="ff1010-labels.npy",
+                        help="File for generated labels, saved as numpy.")
+    parser.add_argument("--use-saved-features",
+                        action="store_true",
+                        help=("Pass this flag to load features and labels from "
+                              "the files specified in --features-npy-path and "
+                              "--labels-npy-path"))
     parser.add_argument("--model-load-path",
                         type=str,
                         default=None,
@@ -200,9 +221,19 @@ def main():
     print("Device:", device)
 
     print("Loading data")
-    features, labels, trainloader, testloader = retrieve_data(
-        pathlib.Path(args.labels_csv_path), pathlib.Path(args.wav_dir),
-        args.batch_size)
+    if args.use_saved_features:
+        print("Using cached features and labels")
+        features = np.load(args.features_npy_path)
+        labels = np.load(args.labels_npy_path)
+    else:
+        print("Generating new features and labels from data")
+        features, labels = retrieve_data(pathlib.Path(args.labels_csv_path),
+                                         pathlib.Path(args.wav_dir),
+                                         pathlib.Path(args.features_npy_path),
+                                         pathlib.Path(args.labels_npy_path))
+    trainloader, testloader = make_dataloaders(features, labels,
+                                               args.batch_size)
+
     print("Making model")
     detector = make_detector_model(features, labels, device)
 
