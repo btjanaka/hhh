@@ -20,13 +20,11 @@ from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 
-# TODO: consider using the full RGB image (though it might not matter much)
 def extract_features(filename):
     """Returns the MFCC."""
     try:
         audio, sample_rate = librosa.load(filename, res_type='kaiser_fast')
         mfccs = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
-        #  mfccsscaled = np.mean(mfccs.T, axis=0)  # Average over time
     except Exception as err:
         print(f"Error encountered while parsing file {filename}: {err}")
         return None
