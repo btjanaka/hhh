@@ -12,10 +12,10 @@ import librosa
 import librosa.display
 import numpy as np
 import pandas as pd
+import sklearn
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
@@ -63,7 +63,7 @@ def make_dataloaders(features, labels,
                      batch_size: int) -> ("trainloader", "testloader"):
     """Make dataloaders from the features and labels."""
     features_train, features_test, labels_train, labels_test = \
-        train_test_split(features, labels, test_size=0.2, random_state=42)
+        sklearn.model_selection.train_test_split(features, labels, test_size=0.2, random_state=42)
 
     trainset = TensorDataset(torch.from_numpy(features_train),
                              torch.from_numpy(labels_train))
@@ -136,7 +136,7 @@ def fit(detector, trainloader, epochs: int, model_path: str, device):
         total_loss = 0.0
 
         # Iterate through batches in the (shuffled) training dataset.
-        for batch_i, data in enumerate(trainloader):
+        for _, data in enumerate(trainloader):
             features = data[0].to(device)
             labels = data[1].to(device)
 
@@ -156,81 +156,91 @@ def fit(detector, trainloader, epochs: int, model_path: str, device):
         torch.save(detector.state_dict(), model_path)
 
 
-def parse_args():
-    """All script options."""
-    parser = argparse.ArgumentParser(
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+def calculate_auc(detector, dataloader, device):
+    """Calculates ROC AUC score."""
+    with torch.no_grad():  # Gradient should not be tracked during evaluation.
+        all_labels, all_outputs = [], []
+        for _, data in enumerate(dataloader):
+            features = data[0].to(device)
+            labels = data[1].to(device)
 
-    # Filepaths
-    parser.add_argument("--labels-csv-path",
-                        type=str,
-                        default="data/bird-audio-detection/ff1010-labels.csv",
-                        help="Location of CSV labels.")
-    parser.add_argument("--wav-dir",
-                        type=str,
-                        default="data/bird-audio-detection/ff1010-wav/",
-                        help="Directory holding WAV files")
-    parser.add_argument("--features-npy-path",
-                        type=str,
-                        default="ff1010-features.npy",
-                        help="File for generated features, saved as numpy.")
-    parser.add_argument("--labels-npy-path",
-                        type=str,
-                        default="ff1010-labels.npy",
-                        help="File for generated labels, saved as numpy.")
-    parser.add_argument("--use-saved-features",
-                        action="store_true",
-                        help=("Pass this flag to load features and labels from "
-                              "the files specified in --features-npy-path and "
-                              "--labels-npy-path"))
-    parser.add_argument("--model-load-path",
-                        type=str,
-                        default=None,
-                        help=("Filepath of a model to load. "
-                              "Leave as None to avoid loading."))
-    parser.add_argument("--model-save-path",
-                        type=str,
-                        default="detector.pth",
-                        help="Filepath to save the model.")
+            outputs = detector(features)
+            all_labels.extend(labels.tolist())
+            all_outputs.extend(outputs.tolist())
 
-    # Computation
-    parser.add_argument("--force-cpu",
-                        action="store_true",
-                        help=("Pass this flag to force PyTorch to use the CPU. "
-                              "Otherwise, the GPU will be used if available."))
-
-    # Algorithm hyperparameters
-    parser.add_argument("--epochs",
-                        type=int,
-                        default=72,
-                        help="Number of epochs to train the model.")
-    parser.add_argument("--batch-size",
-                        type=int,
-                        default=16,
-                        help="Training (and testing) batch size")
-
-    return parser.parse_args()
-
-
-def get_accuracy(detector, dataloader, device):
-    """calculates accuracy"""
-    correct = 0
-    total = 0
-    for _, data in enumerate(dataloader):
-        features = data[0].to(device)
-        labels = data[1].to(device)
-
-        outputs = detector(features)
-        _, predicted = outputs.max(1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
-  
-    print("Accuracy on {} audio files: {:.2f}%".format(total, (100 * correct / total)))
-    return correct / total
+        auc_score = sklearn.metrics.roc_auc_score(all_labels, all_outputs)
+        print(f"AUC on {len(all_labels)} audio files: {auc_score:.4f}")
+        return auc_score
 
 
 def main():
     """Run everything (duh)."""
+
+    def parse_args():
+        """All script options."""
+        parser = argparse.ArgumentParser(
+            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+
+        # Filepaths
+        parser.add_argument(
+            "--labels-csv-path",
+            type=str,
+            default="data/bird-audio-detection/ff1010-labels.csv",
+            help="Location of CSV labels.")
+        parser.add_argument("--wav-dir",
+                            type=str,
+                            default="data/bird-audio-detection/ff1010-wav/",
+                            help="Directory holding WAV files")
+        parser.add_argument("--features-npy-path",
+                            type=str,
+                            default="ff1010-features.npy",
+                            help="File for generated features, saved as numpy.")
+        parser.add_argument("--labels-npy-path",
+                            type=str,
+                            default="ff1010-labels.npy",
+                            help="File for generated labels, saved as numpy.")
+        parser.add_argument(
+            "--use-saved-features",
+            action="store_true",
+            help=("Pass this flag to load features and labels from "
+                  "the files specified in --features-npy-path and "
+                  "--labels-npy-path"))
+        parser.add_argument("--model-load-path",
+                            type=str,
+                            default=None,
+                            help=("Filepath of a model to load. "
+                                  "Leave as None to avoid loading."))
+        parser.add_argument("--model-save-path",
+                            type=str,
+                            default="detector.pth",
+                            help="Filepath to save the model.")
+        parser.add_argument(
+            "--continue-training",
+            action="store_true",
+            default=None,
+            help=("If the model was loaded from a path, pass "
+                  "this parameter to continue training it (by "
+                  "default, no training happens on loaded models."))
+
+        # Computation
+        parser.add_argument(
+            "--force-cpu",
+            action="store_true",
+            help=("Pass this flag to force PyTorch to use the CPU. "
+                  "Otherwise, the GPU will be used if available."))
+
+        # Algorithm hyperparameters
+        parser.add_argument("--epochs",
+                            type=int,
+                            default=72,
+                            help="Number of epochs to train the model.")
+        parser.add_argument("--batch-size",
+                            type=int,
+                            default=16,
+                            help="Training (and testing) batch size")
+
+        return parser.parse_args()
+
     args = parse_args()
 
     # Choose device.
@@ -246,11 +256,11 @@ def main():
     else:
         print("Generating new features and labels from data")
         features, labels = retrieve_data(pathlib.Path(args.labels_csv_path),
-                                          pathlib.Path(args.wav_dir),
-                                          pathlib.Path(args.features_npy_path),
-                                          pathlib.Path(args.labels_npy_path))
+                                         pathlib.Path(args.wav_dir),
+                                         pathlib.Path(args.features_npy_path),
+                                         pathlib.Path(args.labels_npy_path))
     trainloader, testloader = make_dataloaders(features, labels,
-                                                args.batch_size)
+                                               args.batch_size)
 
     print("Making model")
     detector = make_detector_model(features, labels, device)
@@ -259,9 +269,9 @@ def main():
     if args.model_load_path is not None:
         print(f"Loaded model from {args.model_load_path}")
         detector.load_state_dict(torch.load(args.model_load_path))
-    
-    else:
-        # Train.
+
+    # Train a new model or continue training an existing model.
+    if args.model_load_path is None or args.continue_training:
         print("Start training")
         start = time.time()
         fit(detector, trainloader, args.epochs, args.model_save_path, device)
@@ -272,10 +282,8 @@ def main():
         torch.save(detector.state_dict(), args.model_save_path)
         print(f"Model saved to {args.model_save_path}")
 
-    # TODO: evaluation
-    get_accuracy(detector, testloader, device)
+    calculate_auc(detector, testloader, device)
 
 
 if __name__ == "__main__":
     main()
-    
