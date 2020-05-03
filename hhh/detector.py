@@ -3,6 +3,7 @@
 Usage:
     python -m hhh.detector
 """
+
 import argparse
 import pathlib
 import time
@@ -40,7 +41,7 @@ def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
     features = []
     labels = []
 
-    for _, row in tqdm(list(labels_csv.iterrows())[:10]):
+    for _, row in tqdm(list(labels_csv.iterrows())):
         filename = wav_dir / f"{row.itemid}.wav"
         label = row.hasbird
         feature = extract_features(filename)
@@ -211,6 +212,23 @@ def parse_args():
     return parser.parse_args()
 
 
+def get_accuracy(detector, dataloader, device):
+    """calculates accuracy"""
+    correct = 0
+    total = 0
+    for _, data in enumerate(dataloader):
+        features = data[0].to(device)
+        labels = data[1].to(device)
+
+        outputs = detector(features)
+        _, predicted = outputs.max(1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+  
+    print("Accuracy on {} audio files: {:.2f}%".format(total, (100 * correct / total)))
+    return correct / total
+
+
 def main():
     """Run everything (duh)."""
     args = parse_args()
@@ -228,11 +246,11 @@ def main():
     else:
         print("Generating new features and labels from data")
         features, labels = retrieve_data(pathlib.Path(args.labels_csv_path),
-                                         pathlib.Path(args.wav_dir),
-                                         pathlib.Path(args.features_npy_path),
-                                         pathlib.Path(args.labels_npy_path))
+                                          pathlib.Path(args.wav_dir),
+                                          pathlib.Path(args.features_npy_path),
+                                          pathlib.Path(args.labels_npy_path))
     trainloader, testloader = make_dataloaders(features, labels,
-                                               args.batch_size)
+                                                args.batch_size)
 
     print("Making model")
     detector = make_detector_model(features, labels, device)
@@ -241,20 +259,23 @@ def main():
     if args.model_load_path is not None:
         print(f"Loaded model from {args.model_load_path}")
         detector.load_state_dict(torch.load(args.model_load_path))
+    
+    else:
+        # Train.
+        print("Start training")
+        start = time.time()
+        fit(detector, trainloader, args.epochs, args.model_save_path, device)
+        end = time.time()
+        print("End training")
+        print(f"=== Training time: {end - start} s ===")
 
-    # Train.
-    print("Start training")
-    start = time.time()
-    fit(detector, trainloader, args.epochs, args.model_save_path, device)
-    end = time.time()
-    print("End training")
-    print(f"=== Training time: {end - start} s ===")
-
-    torch.save(detector.state_dict(), args.model_save_path)
-    print(f"Model saved to {args.model_save_path}")
+        torch.save(detector.state_dict(), args.model_save_path)
+        print(f"Model saved to {args.model_save_path}")
 
     # TODO: evaluation
+    get_accuracy(detector, testloader, device)
 
 
 if __name__ == "__main__":
     main()
+    
