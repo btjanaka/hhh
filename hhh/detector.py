@@ -1,7 +1,7 @@
 """Detect bird sounds.
 
 Usage:
-    python -m hhh.detector
+    See README
 """
 
 import argparse
