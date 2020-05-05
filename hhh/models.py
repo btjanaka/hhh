@@ -15,7 +15,9 @@ class BasicModel(nn.Module):
     def __init__(self):
         super(BasicModel, self).__init__()
 
-        # Input: (1,40,431)
+        # Input: (1,40,x)
+        # (the adaptive layer allows us to deal with any size x -- the annotated
+        #  sizes are for when x = 431)
         self.model = nn.Sequential(
             nn.Conv2d(in_channels=1,
                       out_channels=16,
@@ -49,8 +51,7 @@ class BasicModel(nn.Module):
             nn.ReLU(),
             nn.MaxPool2d(kernel_size=2),  # -> (128,2,26)
             nn.Dropout(0.2),
-            nn.AvgPool2d(kernel_size=(2,
-                                      26)),  # -> (128,1) (Global Avg Pooling)
+            nn.AdaptiveAvgPool2d(output_size=(1, 1)),  # -> (128,1,1)
             nn.Flatten(),
             nn.Linear(in_features=128,
                       out_features=1),  # -> z = log ( p(bird=1) / p(bird=0) )
