@@ -3,13 +3,11 @@
 Usage:
     See README
 """
-
 import argparse
 import pathlib
 import time
 
 import librosa
-import librosa.display
 import numpy as np
 import pandas as pd
 import sklearn
@@ -17,6 +15,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 import hhh.models
@@ -93,7 +92,8 @@ def make_detector_model(features, labels, device) -> nn.Module:
     return hhh.models.BasicModel().to(device)
 
 
-def fit(detector, trainloader, epochs: int, model_path: str, device):
+def fit(detector, trainloader, epochs: int, model_path, tensorboard_writer,
+        device):
     """Trains the detector model."""
     bce_loss = nn.BCELoss()  # Double check this
     optimizer = optim.Adam(detector.parameters())
@@ -118,13 +118,14 @@ def fit(detector, trainloader, epochs: int, model_path: str, device):
             total_loss += loss.item()
 
         print("Loss:", total_loss)
+        tensorboard_writer.add_scalar("epoch_loss", total_loss, epoch)
 
         # Bookmark
         torch.save(detector.state_dict(), model_path)
 
 
-def calculate_auc(detector, dataloader, device):
-    """Calculates ROC AUC score."""
+def calculate_auc(detector, dataloader, tensorboard_writer, device):
+    """Calculates ROC AUC score with data from the given dataloader."""
     with torch.no_grad():  # Gradient should not be tracked during evaluation.
         all_labels, all_outputs = [], []
         for _, data in enumerate(dataloader):
@@ -137,6 +138,7 @@ def calculate_auc(detector, dataloader, device):
 
         auc_score = sklearn.metrics.roc_auc_score(all_labels, all_outputs)
         print(f"AUC on {len(all_labels)} audio files: {auc_score:.4f}")
+        tensorboard_writer.add_scalar("AUC", auc_score)
         return auc_score
 
 
@@ -188,6 +190,10 @@ def main():
             help=("If the model was loaded from a path, pass "
                   "this parameter to continue training it (by "
                   "default, no training happens on loaded models."))
+        parser.add_argument("--tensorboard-dir",
+                            type=str,
+                            default="tensorboard-logs",
+                            help="Directory for writing logs for tensorboard")
 
         # Computation
         parser.add_argument(
@@ -215,6 +221,9 @@ def main():
     device = torch.device("cuda" if use_cuda else "cpu")
     print("Device:", device)
 
+    # Create a writer for logging output.
+    tensorboard_writer = SummaryWriter(args.tensorboard_dir)
+
     print("Loading data")
     if args.use_saved_features:
         print("Using cached features and labels")
@@ -241,7 +250,8 @@ def main():
     if args.model_load_path is None or args.continue_training:
         print("Start training")
         start = time.time()
-        fit(detector, trainloader, args.epochs, args.model_save_path, device)
+        fit(detector, trainloader, args.epochs, args.model_save_path,
+            tensorboard_writer, device)
         end = time.time()
         print("End training")
         print(f"=== Training time: {end - start} s ===")
@@ -249,7 +259,8 @@ def main():
         torch.save(detector.state_dict(), args.model_save_path)
         print(f"Model saved to {args.model_save_path}")
 
-    calculate_auc(detector, testloader, device)
+    calculate_auc(detector, testloader, tensorboard_writer, device)
+    tensorboard_writer.close()
 
 
 if __name__ == "__main__":

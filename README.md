@@ -40,7 +40,7 @@ The main interface is in the `hhh.detector` script. Run
 Given a dataset with labels in `LABELS.csv` and WAV audio files in `WAV_DIR`,
 train a detector with:
 
-```python
+```bash
 python -m hhh.detector \
   --labels-csv-path LABELS.csv \
   --wav-dir WAV_DIR \
@@ -56,6 +56,17 @@ The above command will also save the model to `detector.pth`. This filepath can
 be changed with the `--model-save-path` flag. To load a model, use the
 `--model-load-path` flag. Note that if you load a model, it will not be trained
 further by default. To continue training, pass the `--continue-training` flag.
+
+#### Tensorboard
+
+Metrics are logged to the directory indicated in the `--tensorboard-dir` flag
+(`tensorboard-logs/` by default). To view these metrics, run
+
+```bash
+tensorboard --logdir <DIR>
+```
+
+And go to http://localhost:6006 in your browser.
 
 #### Hyperparemeters
 
