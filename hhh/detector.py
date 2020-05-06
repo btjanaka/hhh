@@ -48,6 +48,12 @@ def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
         features.append(feature)
         labels.append(label)
 
+    # Pad each feature to have the same length in the time dimension.
+    max_length = max(map(lambda x: x.shape[1], features))
+    for idx, feature in enumerate(features):
+        features[idx] = np.pad(feature,
+                               ((0, 0), (0, max_length - feature.shape[1])))
+
     features = np.array(features, dtype=np.float32)
     features = features.reshape(
         (features.shape[0], 1, features.shape[1], features.shape[2]))
