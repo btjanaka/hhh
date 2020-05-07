@@ -20,30 +20,40 @@ from tqdm import tqdm
 
 import hhh.models
 
+DSP_TECHNIQUES = ['mfcc', 'melstft', 'tonnetz']
 
-def extract_features(filename):
+
+def extract_features(filename, dsp_technique):
     """Returns the MFCC."""
     try:
         audio, sample_rate = librosa.load(filename, res_type='kaiser_fast')
-        mfccs = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
+        representation = None
+        if dsp_technique == DSP_TECHNIQUES[0]:
+            representation = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
+        if dsp_technique == DSP_TECHNIQUES[1]:
+            representation = librosa.feature.melspectrogram(y=audio, sr=sample_rate, n_mels=128)
+            print(representation.shape)
+        if dsp_technique == DSP_TECHNIQUES[2]:
+            representation = librosa.feature.tonnetz(y=audio, sr=sample_rate) # (6, t)
+            print(representation.shape)
     except Exception as err:
         print(f"Error encountered while parsing file {filename}: {err}")
         return None
-    return mfccs
-
+    return representation
 
 def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
                   feature_npy_path: pathlib.Path,
-                  label_npy_path: pathlib.Path) -> ("features", "labels"):
+                  label_npy_path: pathlib.Path,
+                  dsp_technique: str) -> ("features", "labels"):
     """Loads the dataset."""
     labels_csv = pd.read_csv(labels_csv_path)
-    features = []
+    features = [] 
     labels = []
 
     for _, row in tqdm(list(labels_csv.iterrows())):
         filename = wav_dir / f"{row.itemid}.wav"
         label = row.hasbird
-        feature = extract_features(filename)
+        feature = extract_features(filename, dsp_technique)
         features.append(feature)
         labels.append(label)
 
@@ -54,8 +64,10 @@ def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
                                ((0, 0), (0, max_length - feature.shape[1])))
 
     features = np.array(features, dtype=np.float32)
+    print(features.shape)
     features = features.reshape(
         (features.shape[0], 1, features.shape[1], features.shape[2]))
+    print(features.shape)
     labels = np.array(labels, dtype=np.float32)
 
     np.save(feature_npy_path, features)
@@ -87,8 +99,10 @@ def make_dataloaders(features, labels,
     return trainloader, testloader
 
 
-def make_detector_model(features, labels, device) -> nn.Module:
+def make_detector_model(features, labels, device, dsp_technique) -> nn.Module:
     """Returns a new instance of the detector model."""
+    if dsp_technique == DSP_TECHNIQUES[2]:
+        return hhh.models.BasicSmallerModel().to(device)
     return hhh.models.BasicModel().to(device)
 
 
@@ -202,6 +216,14 @@ def main():
             help=("Pass this flag to force PyTorch to use the CPU. "
                   "Otherwise, the GPU will be used if available."))
 
+        # Audio File Representation (DSP)
+        parser.add_argument(
+            "--dsp",
+            choices=DSP_TECHNIQUES,
+            default='mfcc',
+            help=("Specify which DSP technique should be applied to the audio input.")
+        )
+
         # Algorithm hyperparameters
         parser.add_argument("--epochs",
                             type=int,
@@ -211,6 +233,7 @@ def main():
                             type=int,
                             default=16,
                             help="Training (and testing) batch size")
+        
 
         return parser.parse_args()
 
@@ -234,12 +257,13 @@ def main():
         features, labels = retrieve_data(pathlib.Path(args.labels_csv_path),
                                          pathlib.Path(args.wav_dir),
                                          pathlib.Path(args.features_npy_path),
-                                         pathlib.Path(args.labels_npy_path))
+                                         pathlib.Path(args.labels_npy_path),
+                                         args.dsp)
     trainloader, testloader = make_dataloaders(features, labels,
                                                args.batch_size)
 
     print("Making model")
-    detector = make_detector_model(features, labels, device)
+    detector = make_detector_model(features, labels, device, args.dsp)
 
     # Load the model if so desired.
     if args.model_load_path is not None:

@@ -60,3 +60,29 @@ class BasicModel(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+class BasicSmallerModel(nn.Module):
+    """A basic model based on this article:
+    https://medium.com/@mikesmales/sound-classification-using-deep-learning-8bc2aa1990b7
+
+    Takes the input MFCC and gradually uses convolution to make it smaller. The
+    last part of the architecture is a 128-node fully connected layer connected
+    to a single output node. A sigmoid activation converts this output to the
+    probability that the audio recording contains a bird sound.
+    """
+
+    def __init__(self):
+        super(BasicSmallerModel, self).__init__()
+
+        # Input: (1,6,x)
+        # (the adaptive layer allows us to deal with any size x -- the annotated
+        #  sizes are for when x = 431)
+        self.model = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(in_features=2586,
+                      out_features=1),  # -> z = log ( p(bird=1) / p(bird=0) )
+            nn.Sigmoid(),  # -> p(bird = 1) = sigmoid(z)
+        )
+
+    def forward(self, x):
+        return self.model(x)
