@@ -1,4 +1,5 @@
 """Models for bird audio detection."""
+import torch
 import torch.nn as nn
 
 
@@ -61,6 +62,7 @@ class BasicModel(nn.Module):
     def forward(self, x):
         return self.model(x)
 
+
 class BasicSmallerModel(nn.Module):
     """A basic model based on this article:
     https://medium.com/@mikesmales/sound-classification-using-deep-learning-8bc2aa1990b7
@@ -86,3 +88,69 @@ class BasicSmallerModel(nn.Module):
 
     def forward(self, x):
         return self.model(x)
+
+
+class ConvNet(nn.Module):
+
+    def __init__(self):
+        super(ConvNet, self).__init__()
+
+        self.model = nn.Sequential(
+            nn.Conv2d(in_channels=1,
+                      out_channels=16,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),  # -> (16,40,431)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),  # -> (16,20,215)
+            nn.Dropout(0.2),
+            nn.Conv2d(in_channels=16,
+                      out_channels=32,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),  # -> (32,20,215)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),  # -> (32,10,107)
+            nn.Dropout(0.2),
+            nn.Conv2d(in_channels=32,
+                      out_channels=64,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),  # -> (64,10,107)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),  # -> (64,5,53)
+            nn.Dropout(0.2),
+            nn.Conv2d(in_channels=64,
+                      out_channels=128,
+                      kernel_size=3,
+                      stride=1,
+                      padding=1),  # -> (128,5,53)
+            nn.ReLU(),
+            nn.MaxPool2d(kernel_size=2),  # -> (128,2,26)
+            nn.Dropout(0.2),
+            nn.AdaptiveAvgPool2d(output_size=(1, 1)),  # -> (128,1,1)
+            nn.Flatten(),
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class MultifeatureModel(nn.Module):
+    """MultifeatureModel"""
+
+    def __init__(self, n):
+        super(MultifeatureModel, self).__init__()
+
+        self.feature_convs = nn.ModuleList([ConvNet() for _ in range(n)])
+
+        self.combiner = nn.Sequential(
+            nn.Linear(in_features=n * 128,
+                      out_features=1),  # -> z = log ( p(bird=1) / p(bird=0) )
+            nn.Sigmoid(),  # -> p(bird = 1) = sigmoid(z)
+        )
+
+    def forward(self, x: "length-n list of features"):
+        z_list = [f(xi) for f, xi in zip(self.feature_convs, x)]
+        z = torch.cat(z_list, dim=1)  # (BATCH_SIZE, n*128)
+        return self.combiner(z)

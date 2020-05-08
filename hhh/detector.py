@@ -5,6 +5,7 @@ Usage:
 """
 import argparse
 import pathlib
+import pickle
 import time
 
 import librosa
@@ -20,57 +21,72 @@ from tqdm import tqdm
 
 import hhh.models
 
-DSP_TECHNIQUES = ['mfcc', 'melstft', 'tonnetz']
+DSP_TECHNIQUES = ['mfcc', 'chroma', 'spectral_contrast']
 
 
 def extract_features(filename, dsp_technique):
     """Returns the MFCC."""
     try:
         audio, sample_rate = librosa.load(filename, res_type='kaiser_fast')
-        representation = None
-        if dsp_technique == DSP_TECHNIQUES[0]:
-            representation = librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
-        if dsp_technique == DSP_TECHNIQUES[1]:
-            representation = librosa.feature.melspectrogram(y=audio, sr=sample_rate, n_mels=128)
-            print(representation.shape)
-        if dsp_technique == DSP_TECHNIQUES[2]:
-            representation = librosa.feature.tonnetz(y=audio, sr=sample_rate) # (6, t)
-            print(representation.shape)
+        representation = []
+
+        if DSP_TECHNIQUES[0] in dsp_technique:
+            representation.append(
+                librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
+            )
+
+        if DSP_TECHNIQUES[1] in dsp_technique:
+            #representation = librosa.feature.melspectrogram(y=audio,
+            #                                                sr=sample_rate,
+            #                                                n_mels=128)
+            representation.append(
+                librosa.feature.chroma_stft(audio, n_chroma=16)
+            )
+        if DSP_TECHNIQUES[2] in dsp_technique:
+            representation.append(
+                librosa.feature.spectral_contrast(audio, sr=sample_rate, n_bands=16)
+            )
+            #representation = librosa.feature.tonnetz(y=audio,
+            #                                         sr=sample_rate)  # (6, t)
+
     except Exception as err:
         print(f"Error encountered while parsing file {filename}: {err}")
         return None
+
     return representation
 
+
 def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
-                  feature_npy_path: pathlib.Path,
-                  label_npy_path: pathlib.Path,
+                  feature_npy_path: pathlib.Path, label_npy_path: pathlib.Path,
                   dsp_technique: str) -> ("features", "labels"):
     """Loads the dataset."""
     labels_csv = pd.read_csv(labels_csv_path)
-    features = [] 
+    features = []
     labels = []
+
+    max_length = 450 # !Empirically determined
 
     for _, row in tqdm(list(labels_csv.iterrows())):
         filename = wav_dir / f"{row.itemid}.wav"
         label = row.hasbird
         feature = extract_features(filename, dsp_technique)
-        features.append(feature)
-        labels.append(label)
+        # Throw out ones that are longer than the max length.
+        if feature[0].shape[1] <= max_length:
 
-    # Pad each feature to have the same length in the time dimension.
-    max_length = max(map(lambda x: x.shape[1], features))
-    for idx, feature in enumerate(features):
-        features[idx] = np.pad(feature,
-                               ((0, 0), (0, max_length - feature.shape[1])))
+            # Pad each feature to have the same length in the time dimension.
+            for idx, f in enumerate(feature):
+                feature[idx] = np.pad(f, ((0, 0), (0, max_length - f.shape[1])))
 
-    features = np.array(features, dtype=np.float32)
-    print(features.shape)
-    features = features.reshape(
-        (features.shape[0], 1, features.shape[1], features.shape[2]))
-    print(features.shape)
+            features.append(feature)
+            labels.append(label)
+
+    # features: [[x11,x21,...], [x21,x22,...], [x31,x32,...]]
+    features = list(map(lambda x: np.reshape(np.array(x), (x.shape[0], 1, x.shape[1], x.shape[2])), zip(*features)))
+    
     labels = np.array(labels, dtype=np.float32)
 
-    np.save(feature_npy_path, features)
+    with feature_npy_path.open() as f:
+        pickle.dump(features, f)
     np.save(label_npy_path, labels)
 
     return features, labels
@@ -79,9 +95,10 @@ def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
 def make_dataloaders(features, labels,
                      batch_size: int) -> ("trainloader", "testloader"):
     """Make dataloaders from the features and labels."""
-    features_train, features_test, labels_train, labels_test = \
-        sklearn.model_selection.train_test_split(features, labels, test_size=0.2, random_state=42)
+    indices_train, indices_test, labels_train, labels_test = \
+        sklearn.model_selection.train_test_split(np.arange(len(labels)), labels, test_size=0.2, random_state=42)
 
+    # TODO: bookmark -- figure out how to put all the features in this dataset
     trainset = TensorDataset(torch.from_numpy(features_train),
                              torch.from_numpy(labels_train))
     testset = TensorDataset(torch.from_numpy(features_test),
@@ -99,11 +116,10 @@ def make_dataloaders(features, labels,
     return trainloader, testloader
 
 
-def make_detector_model(features, labels, device, dsp_technique) -> nn.Module:
+def make_detector_model(device, dsp_technique) -> nn.Module:
     """Returns a new instance of the detector model."""
-    if dsp_technique == DSP_TECHNIQUES[2]:
-        return hhh.models.BasicSmallerModel().to(device)
-    return hhh.models.BasicModel().to(device)
+    return hhh.models.MultifeatureModel(len(dsp_technique)).to(device)
+
 
 
 def fit(detector, trainloader, epochs: int, model_path, tensorboard_writer,
@@ -174,6 +190,7 @@ def main():
                             type=str,
                             default="data/bird-audio-detection/ff1010-wav/",
                             help="Directory holding WAV files")
+        # TODO: change to pickle
         parser.add_argument("--features-npy-path",
                             type=str,
                             default="ff1010-features.npy",
@@ -219,10 +236,11 @@ def main():
         # Audio File Representation (DSP)
         parser.add_argument(
             "--dsp",
-            choices=DSP_TECHNIQUES,
+            choices=DSP_TECHNIQUES + ['all'],
             default='mfcc',
-            help=("Specify which DSP technique should be applied to the audio input.")
-        )
+            help=
+            ("Specify which DSP technique should be applied to the audio input."
+            ))
 
         # Algorithm hyperparameters
         parser.add_argument("--epochs",
@@ -233,11 +251,11 @@ def main():
                             type=int,
                             default=16,
                             help="Training (and testing) batch size")
-        
 
         return parser.parse_args()
 
     args = parse_args()
+    args.dsp = DSP_TECHNIQUES if args.dsp == 'all' else args.dsp
 
     # Choose device.
     use_cuda = torch.cuda.is_available() and not args.force_cpu
@@ -263,7 +281,7 @@ def main():
                                                args.batch_size)
 
     print("Making model")
-    detector = make_detector_model(features, labels, device, args.dsp)
+    detector = make_detector_model(device, args.dsp)
 
     # Load the model if so desired.
     if args.model_load_path is not None:
