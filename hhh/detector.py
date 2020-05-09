@@ -23,10 +23,10 @@ import hhh.models
 
 DSP_TECHNIQUES = ['mfcc', 'chroma', 'spectral_contrast']
 PREPROCESSOR_TYPES = {
-        'mfcc': hhh.models.ConvNet, 
-        'spectral_contrast': hhh.models.BabyConvNet, 
-        'chroma': hhh.models.BabyConvNet
-    }
+    'mfcc': hhh.models.ConvNet,
+    'spectral_contrast': hhh.models.BabyConvNet,
+    'chroma': hhh.models.BabyConvNet
+}
 
 
 def extract_features(filename, dsp_technique):
@@ -36,21 +36,15 @@ def extract_features(filename, dsp_technique):
         representation = []
 
         if DSP_TECHNIQUES[0] in dsp_technique:
-            representation.append(
-                librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40)
-            )
+            representation.append(librosa.feature.mfcc(y=audio, sr=sample_rate, n_mfcc=40))
 
         if DSP_TECHNIQUES[1] in dsp_technique:
             #representation = librosa.feature.melspectrogram(y=audio,
             #                                                sr=sample_rate,
             #                                                n_mels=128)
-            representation.append(
-                librosa.feature.chroma_stft(audio)
-            )
+            representation.append(librosa.feature.chroma_stft(audio))
         if DSP_TECHNIQUES[2] in dsp_technique:
-            representation.append(
-                librosa.feature.spectral_contrast(audio, sr=sample_rate)
-            )
+            representation.append(librosa.feature.spectral_contrast(audio, sr=sample_rate))
             #representation = librosa.feature.tonnetz(y=audio,
             #                                         sr=sample_rate)  # (6, t)
 
@@ -60,15 +54,14 @@ def extract_features(filename, dsp_technique):
         return None
 
 
-def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
-                  features_pkl_path: pathlib.Path, label_npy_path: pathlib.Path,
-                  dsp_technique: str) -> ("features", "labels"):
+def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path, features_pkl_path: pathlib.Path,
+                  label_npy_path: pathlib.Path, dsp_technique: str) -> ("features", "labels"):
     """Loads the dataset."""
     labels_csv = pd.read_csv(labels_csv_path)
-    features = [] # ALL the features
+    features = []  # ALL the features
     labels = []
 
-    max_length = 450 # !Empirically determined
+    max_length = 450  # !Empirically determined
 
     for _, row in tqdm(list(labels_csv.iterrows())):
         filename = wav_dir / f"{row.itemid}.wav"
@@ -90,8 +83,9 @@ def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
     def convert(x):
         x = np.array(x, dtype=np.float32)
         return x.reshape((x.shape[0], 1, x.shape[1], x.shape[2]))
+
     features = list(map(convert, zip(*features)))
-    
+
     labels = np.array(labels, dtype=np.float32)
 
     with features_pkl_path.open("wb") as f:
@@ -101,25 +95,16 @@ def retrieve_data(labels_csv_path: pathlib.Path, wav_dir: pathlib.Path,
     return features, labels
 
 
-def make_dataloaders(features, labels,
-                     batch_size: int) -> ("trainloader", "testloader"):
+def make_dataloaders(features, labels, batch_size: int) -> ("trainloader", "testloader"):
     """Make dataloaders from the features and labels."""
     indices_train, indices_test, labels_train, labels_test = \
         sklearn.model_selection.train_test_split(np.arange(len(labels)), labels, test_size=0.2, random_state=42)
 
-    trainset = TensorDataset(*[torch.from_numpy(f[indices_train]) for f in features],
-                             torch.from_numpy(labels_train))
-    testset = TensorDataset(*[torch.from_numpy(f[indices_test]) for f in features],
-                            torch.from_numpy(labels_test))
+    trainset = TensorDataset(*[torch.from_numpy(f[indices_train]) for f in features], torch.from_numpy(labels_train))
+    testset = TensorDataset(*[torch.from_numpy(f[indices_test]) for f in features], torch.from_numpy(labels_test))
 
-    trainloader = DataLoader(trainset,
-                             batch_size=batch_size,
-                             shuffle=True,
-                             num_workers=2)
-    testloader = DataLoader(testset,
-                            batch_size=batch_size,
-                            shuffle=False,
-                            num_workers=2)
+    trainloader = DataLoader(trainset, batch_size=batch_size, shuffle=True, num_workers=2)
+    testloader = DataLoader(testset, batch_size=batch_size, shuffle=False, num_workers=2)
 
     return trainloader, testloader
 
@@ -129,8 +114,7 @@ def make_detector_model(device, dsp_technique) -> nn.Module:
     return hhh.models.MultifeatureModel(list(map(PREPROCESSOR_TYPES.get, dsp_technique))).to(device)
 
 
-def fit(detector, trainloader, epochs: int, model_path, tensorboard_writer,
-        device):
+def fit(detector, trainloader, epochs: int, model_path, tensorboard_writer, device):
     """Trains the detector model."""
     bce_loss = nn.BCELoss()  # Double check this
     optimizer = optim.Adam(detector.parameters())
@@ -184,15 +168,13 @@ def main():
 
     def parse_args():
         """All script options."""
-        parser = argparse.ArgumentParser(
-            formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+        parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
         # Filepaths
-        parser.add_argument(
-            "--labels-csv-path",
-            type=str,
-            default="data/bird-audio-detection/ff1010-labels.csv",
-            help="Location of CSV labels.")
+        parser.add_argument("--labels-csv-path",
+                            type=str,
+                            default="data/bird-audio-detection/ff1010-labels.csv",
+                            help="Location of CSV labels.")
         parser.add_argument("--wav-dir",
                             type=str,
                             default="data/bird-audio-detection/ff1010-wav/",
@@ -205,58 +187,43 @@ def main():
                             type=str,
                             default="ff1010-labels.npy",
                             help="File for generated labels, saved as numpy.")
-        parser.add_argument(
-            "--use-saved-features",
-            action="store_true",
-            help=("Pass this flag to load features and labels from "
-                  "the files specified in --features-npy-path and "
-                  "--labels-npy-path"))
+        parser.add_argument("--use-saved-features",
+                            action="store_true",
+                            help=("Pass this flag to load features and labels from "
+                                  "the files specified in --features-npy-path and "
+                                  "--labels-npy-path"))
         parser.add_argument("--model-load-path",
                             type=str,
                             default=None,
                             help=("Filepath of a model to load. "
                                   "Leave as None to avoid loading."))
-        parser.add_argument("--model-save-path",
-                            type=str,
-                            default="detector.pth",
-                            help="Filepath to save the model.")
-        parser.add_argument(
-            "--continue-training",
-            action="store_true",
-            default=None,
-            help=("If the model was loaded from a path, pass "
-                  "this parameter to continue training it (by "
-                  "default, no training happens on loaded models."))
+        parser.add_argument("--model-save-path", type=str, default="detector.pth", help="Filepath to save the model.")
+        parser.add_argument("--continue-training",
+                            action="store_true",
+                            default=None,
+                            help=("If the model was loaded from a path, pass "
+                                  "this parameter to continue training it (by "
+                                  "default, no training happens on loaded models."))
         parser.add_argument("--tensorboard-dir",
                             type=str,
                             default="tensorboard-logs",
                             help="Directory for writing logs for tensorboard")
 
         # Computation
-        parser.add_argument(
-            "--force-cpu",
-            action="store_true",
-            help=("Pass this flag to force PyTorch to use the CPU. "
-                  "Otherwise, the GPU will be used if available."))
+        parser.add_argument("--force-cpu",
+                            action="store_true",
+                            help=("Pass this flag to force PyTorch to use the CPU. "
+                                  "Otherwise, the GPU will be used if available."))
 
         # Audio File Representation (DSP)
-        parser.add_argument(
-            "--dsp",
-            choices=DSP_TECHNIQUES + ['all'],
-            default='mfcc',
-            help=
-            ("Specify which DSP technique should be applied to the audio input."
-            ))
+        parser.add_argument("--dsp",
+                            choices=DSP_TECHNIQUES + ['all'],
+                            default='mfcc',
+                            help=("Specify which DSP technique should be applied to the audio input."))
 
         # Algorithm hyperparameters
-        parser.add_argument("--epochs",
-                            type=int,
-                            default=72,
-                            help="Number of epochs to train the model.")
-        parser.add_argument("--batch-size",
-                            type=int,
-                            default=16,
-                            help="Training (and testing) batch size")
+        parser.add_argument("--epochs", type=int, default=72, help="Number of epochs to train the model.")
+        parser.add_argument("--batch-size", type=int, default=16, help="Training (and testing) batch size")
 
         return parser.parse_args()
 
@@ -279,13 +246,10 @@ def main():
         labels = np.load(args.labels_npy_path)
     else:
         print("Generating new features and labels from data")
-        features, labels = retrieve_data(pathlib.Path(args.labels_csv_path),
-                                         pathlib.Path(args.wav_dir),
-                                         pathlib.Path(args.features_pkl_path),
-                                         pathlib.Path(args.labels_npy_path),
+        features, labels = retrieve_data(pathlib.Path(args.labels_csv_path), pathlib.Path(args.wav_dir),
+                                         pathlib.Path(args.features_pkl_path), pathlib.Path(args.labels_npy_path),
                                          args.dsp)
-    trainloader, testloader = make_dataloaders(features, labels,
-                                               args.batch_size)
+    trainloader, testloader = make_dataloaders(features, labels, args.batch_size)
 
     print("Making model")
     detector = make_detector_model(device, args.dsp)
@@ -299,8 +263,7 @@ def main():
     if args.model_load_path is None or args.continue_training:
         print("Start training")
         start = time.time()
-        fit(detector, trainloader, args.epochs, args.model_save_path,
-            tensorboard_writer, device)
+        fit(detector, trainloader, args.epochs, args.model_save_path, tensorboard_writer, device)
         end = time.time()
         print("End training")
         print(f"=== Training time: {end - start} s ===")

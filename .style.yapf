@@ -1,2 +1,4 @@
-COLUMN_LIMIT = 119
+[style]
+based_on_style = google
+column_limit = 119
 
