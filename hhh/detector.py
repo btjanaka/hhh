@@ -114,7 +114,23 @@ def make_detector_model(device, dsp_technique) -> nn.Module:
     return hhh.models.MultifeatureModel(list(map(PREPROCESSOR_TYPES.get, dsp_technique))).to(device)
 
 
-def fit(detector, trainloader, epochs: int, model_path, tensorboard_writer, device):
+def calculate_auc(detector, dataloader, device):
+    """Calculates ROC AUC score with data from the given dataloader."""
+    with torch.no_grad():  # Gradient should not be tracked during evaluation.
+        all_labels, all_outputs = [], []
+        for _, data in enumerate(dataloader):
+            features = [d.to(device) for d in data[:-1]]
+            labels = data[-1].to(device)
+
+            outputs = detector(features)
+            all_labels.extend(labels.tolist())
+            all_outputs.extend(outputs.tolist())
+
+        auc_score = sklearn.metrics.roc_auc_score(all_labels, all_outputs)
+        return auc_score
+
+
+def fit(detector, trainloader, testloader, epochs: int, model_path, tensorboard_writer, device):
     """Trains the detector model."""
     bce_loss = nn.BCELoss()  # Double check this
     optimizer = optim.Adam(detector.parameters())
@@ -138,29 +154,24 @@ def fit(detector, trainloader, epochs: int, model_path, tensorboard_writer, devi
             # Logging
             total_loss += loss.item()
 
-        print("Loss:", total_loss)
+        train_auc = calculate_auc(detector, trainloader, device)
+        test_auc = calculate_auc(detector, testloader, device)
+
         tensorboard_writer.add_scalar("epoch_loss", total_loss, epoch)
+        tensorboard_writer.add_scalars("AUC", {
+            'train': train_auc,
+            'test': test_auc,
+        }, epoch)
+
+        print(f"+-----------+------------+")
+        print(f"| Loss      | {total_loss:10.4f} |")
+        print(f"| Train AUC | {train_auc:10.4f} |")
+        print(f"| Test AUC  | {test_auc:10.4f} |")
+        print(f"+-----------+------------+")
+        print()
 
         # Bookmark
         torch.save(detector.state_dict(), model_path)
-
-
-def calculate_auc(detector, dataloader, tensorboard_writer, device):
-    """Calculates ROC AUC score with data from the given dataloader."""
-    with torch.no_grad():  # Gradient should not be tracked during evaluation.
-        all_labels, all_outputs = [], []
-        for _, data in enumerate(dataloader):
-            features = [d.to(device) for d in data[:-1]]
-            labels = data[-1].to(device)
-
-            outputs = detector(features)
-            all_labels.extend(labels.tolist())
-            all_outputs.extend(outputs.tolist())
-
-        auc_score = sklearn.metrics.roc_auc_score(all_labels, all_outputs)
-        print(f"AUC on {len(all_labels)} audio files: {auc_score:.4f}")
-        tensorboard_writer.add_scalar("AUC", auc_score)
-        return auc_score
 
 
 def main():
@@ -228,7 +239,7 @@ def main():
         return parser.parse_args()
 
     args = parse_args()
-    args.dsp = DSP_TECHNIQUES if args.dsp == 'all' else args.dsp
+    args.dsp = DSP_TECHNIQUES if args.dsp == 'all' else [args.dsp]
 
     # Choose device.
     use_cuda = torch.cuda.is_available() and not args.force_cpu
@@ -263,7 +274,7 @@ def main():
     if args.model_load_path is None or args.continue_training:
         print("Start training")
         start = time.time()
-        fit(detector, trainloader, args.epochs, args.model_save_path, tensorboard_writer, device)
+        fit(detector, trainloader, testloader, args.epochs, args.model_save_path, tensorboard_writer, device)
         end = time.time()
         print("End training")
         print(f"=== Training time: {end - start} s ===")
@@ -271,7 +282,6 @@ def main():
         torch.save(detector.state_dict(), args.model_save_path)
         print(f"Model saved to {args.model_save_path}")
 
-    calculate_auc(detector, testloader, tensorboard_writer, device)
     tensorboard_writer.close()
 
 
