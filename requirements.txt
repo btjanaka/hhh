@@ -1,8 +1,10 @@
 librosa
 numpy
 pandas
-torch
+torch==1.5.0
 sklearn
 matplotlib
 tqdm
 tensorboard
+seaborn
+jupyterlab

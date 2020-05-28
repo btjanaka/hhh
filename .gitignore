@@ -13,3 +13,7 @@ data/
 
 # Pytorch
 *.pth
+
+# Notebooks
+.ipynb_checkpoints/
+notebooks/*.png

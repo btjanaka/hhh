@@ -96,6 +96,17 @@ After unzipping, rename and relocate the audio files as follows:
 -  `mv warblrb10k_public_wav data/bird-audio-detection/warblr-wav`
 -  `mv BirdVox-DCASE-20k data/bird-audio-detection/birdvox-wav`
 
+#### Preliminary Analysis
+
+To perform some analysis on the data, open Jupyter Lab with:
+
+```bash
+jupyter lab
+```
+
+Within Jupyter Lab, open `notebooks/early-analysis.ipynb`. Run the cells to
+perform preliminary analysis on the data.
+
 #### Scripts
 
 Shell scripts containing a few of the run commands we used to train our final models can be found in the `scripts/` directory.
