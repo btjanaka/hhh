@@ -4,12 +4,12 @@ python -m hhh.detector \
   --wav-dir data/bird-audio-detection/warblr-wav \
   --features-pkl-path warblr-features.pkl \
   --labels-npy-path warblr-labels.npy \
-  --model-save-path warblr-detector.pth \
-  --tensorboard-dir warblr-tensorboard-logs \
+  --model-save-path warblr-all-detector.pth \
+  --tensorboard-dir warblr-all-tensorboard-logs \
   --dsp all \
   --batch-size 16 \
-  --epochs 120
+  --epochs 100 \
 
-  # --model-load-path warblr-detector.pth \
   # --use-saved-features \
+  # --model-load-path warblr-all-detector.pth \
   # --continue-training \
