@@ -38,14 +38,15 @@ The main interface is in the `hhh.detector` script. Run
 `python -m hhh.detector -h` for full help info.
 
 Given a dataset with labels in `LABELS.csv` and WAV audio files in `WAV_DIR`,
-train a detector with:
+train a detector with all available audio features using:
 
 ```bash
 python -m hhh.detector \
   --labels-csv-path LABELS.csv \
   --wav-dir WAV_DIR \
   --features-npy-path FEATURES.npy \
-  --labels-npy-path LABELS.npy
+  --labels-npy-path LABELS.npy \
+  --dsp all
 ```
 
 `FEATURES.npy` and `LABELS.npy` will store computed features and labels of the
