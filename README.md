@@ -1,4 +1,4 @@
-# High Entropy Homies
+# High Entropy Homies - Bird Audio Detection
 
 <div style="display:block; margin: 0px auto; width:200px; text-align: center">
 
