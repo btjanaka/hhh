@@ -16,9 +16,11 @@ Deep Learning.
 
 ## Project Overview
 
-We seek to detect bird sounds from 10-second audio recordings, as described in
+We seek to explore the performance difference from using different audio
+features to detect bird sounds from 10-second audio recordings, as described in
 the
 [DCASE 2018 Challenge](http://dcase.community/challenge2018/task-bird-audio-detection).
+Please see our [report](docs/report.pdf) for more info.
 
 ## Instructions
 
@@ -67,7 +69,7 @@ Metrics are logged to the directory indicated in the `--tensorboard-dir` flag
 tensorboard --logdir <DIR>
 ```
 
-And go to http://localhost:6006 in your browser. 
+And go to http://localhost:6006 in your browser.
 
 #### Hyperparemeters
 
@@ -82,19 +84,24 @@ Pass the `--force-cpu` flag to force training on a CPU.
 
 #### Datasets
 
-To run our experiments, first create a new directory by running the command `mkdir -p data/bird-audio-detection` from the root directory.
+To run our experiments, first create a new directory by running the command
+`mkdir -p data/bird-audio-detection` from the root directory.
 
-Next, navigate to [http://dcase.community/challenge2018/task-bird-audio-detection](http://dcase.community/challenge2018/task-bird-audio-detection) and download all three datasets listed under **Development Datasets**.
+Next, navigate to
+[http://dcase.community/challenge2018/task-bird-audio-detection](http://dcase.community/challenge2018/task-bird-audio-detection)
+and download all three datasets listed under **Development Datasets**.
 
 Rename and relocate the data labels as follows:
--  `mv ff1010bird_metadata_2018.csv data/bird-audio-detection/ff1010-labels.csv`
--  `mv warblrb10k_public_metadata_2018.csv data/bird-audio-detection/warblr-labels.csv`
--  `mv BirdVoxDCASE20k_csvpublic.csv data/bird-audio-detection/birdvox-labels.csv`
+
+- `mv ff1010bird_metadata_2018.csv data/bird-audio-detection/ff1010-labels.csv`
+- `mv warblrb10k_public_metadata_2018.csv data/bird-audio-detection/warblr-labels.csv`
+- `mv BirdVoxDCASE20k_csvpublic.csv data/bird-audio-detection/birdvox-labels.csv`
 
 After unzipping, rename and relocate the audio files as follows:
--  `mv ff1010bird_wav data/bird-audio-detection/ff1010-wav`
--  `mv warblrb10k_public_wav data/bird-audio-detection/warblr-wav`
--  `mv BirdVox-DCASE-20k data/bird-audio-detection/birdvox-wav`
+
+- `mv ff1010bird_wav data/bird-audio-detection/ff1010-wav`
+- `mv warblrb10k_public_wav data/bird-audio-detection/warblr-wav`
+- `mv BirdVox-DCASE-20k data/bird-audio-detection/birdvox-wav`
 
 #### Preliminary Analysis
 
@@ -109,6 +116,10 @@ perform preliminary analysis on the data.
 
 #### Scripts
 
-Shell scripts containing a few of the run commands we used to train our final models can be found in the `scripts/` directory.
+Shell scripts containing a few of the run commands we used to train our final
+models can be found in the `scripts/` directory.
 
-To execute, run the command `bash scripts/run_birdvox.sh` from the root directory to train a model on the _BirdVox-DCASE-20k_ dataset. Scripts for the _Warblr10k_ dataset and the _FreeField1010_ dataset are also located in the same directory.
+To execute, run the command `bash scripts/run_birdvox.sh` from the root
+directory to train a model on the _BirdVox-DCASE-20k_ dataset. Scripts for the
+_Warblr10k_ dataset and the _FreeField1010_ dataset are also located in the same
+directory.
