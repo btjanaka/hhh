@@ -103,7 +103,7 @@ After unzipping, rename and relocate the audio files as follows:
 - `mv warblrb10k_public_wav data/bird-audio-detection/warblr-wav`
 - `mv BirdVox-DCASE-20k data/bird-audio-detection/birdvox-wav`
 
-#### Preliminary Analysis
+#### Exploratory Data Analysis
 
 To perform some analysis on the data, open Jupyter Lab with:
 
@@ -111,8 +111,8 @@ To perform some analysis on the data, open Jupyter Lab with:
 jupyter lab
 ```
 
-Within Jupyter Lab, open `notebooks/early-analysis.ipynb`. Run the cells to
-perform preliminary analysis on the data.
+Within Jupyter Lab, open `notebooks/exploratory-analysis.ipynb`. Run the cells
+to perform exploratory analysis on the data.
 
 #### Scripts
 
